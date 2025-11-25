@@ -1,0 +1,4 @@
+html,body{height:100%;margin:0;background:#0b1221;color:#e6edf3;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+#game{display:block;width:100vw;height:100vh}
+.hud{position:fixed;top:12px;left:12px;background:rgba(0,0,0,0.4);padding:8px 12px;border-radius:8px;font-weight:600}
+.hint{font-weight:400;opacity:.8;font-size:12px}
