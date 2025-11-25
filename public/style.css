@@ -1,7 +1,13 @@
-html,body{height:100%;margin:0;background:#0b1221;color:#e6edf3;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-#game{display:block;width:100vw;height:100vh}
-.hud{position:fixed;top:12px;left:12px;background:rgba(0,0,0,0.4);padding:8px 12px;border-radius:8px;font-weight:600}
-.hint{font-weight:400;opacity:.8;font-size:12px}
+html,body{height:100%;margin:0;background:radial-gradient(1200px 800px at 50% 40%,#0e1a2f 0%,#0b1221 60%,#070d17 100%);color:#e6edf3;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+#game{display:block;width:100vw;height:100vh;cursor:crosshair}
+.hud{position:fixed;top:16px;left:16px;background:rgba(15,27,51,0.6);padding:10px 14px;border-radius:12px;font-weight:600;backdrop-filter:saturate(1.2);box-shadow:0 8px 28px rgba(0,0,0,0.35)}
+.hint{font-weight:500;opacity:.75;font-size:12px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center}
+.modal{background:#0f1b33;padding:20px 24px;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.5);display:flex;gap:12px;flex-direction:column;min-width:300px}
+.modal .title{font-weight:700;font-size:18px}
+.modal input{padding:12px;border-radius:10px;border:1px solid #2a3e63;background:#0b1221;color:#e6edf3}
+.modal button{padding:12px;border-radius:10px;border:0;background:#4c8bf5;color:#fff;font-weight:600;cursor:pointer}
+.modal button:hover{filter:brightness(1.08)}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center}
 .modal{background:#0f1b33;padding:20px 24px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.4);display:flex;gap:10px;flex-direction:column;min-width:260px}
 .modal .title{font-weight:700;font-size:16px}

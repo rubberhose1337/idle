@@ -13,8 +13,11 @@ let world = { width: 2000, height: 2000 }
 let players = new Map()
 let me = { id: meId, x: world.width/2, y: world.height/2, color: '#5bd1ff', hp: 100 }
 players.set(me.id, me)
-let projectiles = []
+let bullets = new Map()
 let aim = null
+let mouseLeft = false
+let dmgPopups = []
+let lastBossHp = null
 function isDead(){ return me && me.deadUntil && Date.now() < me.deadUntil }
 
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host)
@@ -65,12 +68,39 @@ ws.addEventListener('message', ev => {
       me.deadUntil = mine.deadUntil ?? me.deadUntil
       me.name = mine.name ?? me.name
     }
-    projectiles = Array.isArray(msg.projectiles) ? msg.projectiles : []
+    const boss = Array.from(players.values()).find(p => p.boss)
+    if (boss) {
+      const hpNow = boss.hp || 0
+      if (lastBossHp != null && hpNow < lastBossHp) {
+        const dmg = lastBossHp - hpNow
+        dmgPopups.push({ x: boss.x, y: boss.y - 18, amount: dmg, t: 0 })
+      }
+      lastBossHp = hpNow
+    }
+    const nowT = performance.now()
+    const ids = new Set()
+    const listB = Array.isArray(msg.projectiles) ? msg.projectiles : []
+    for (const b of listB) {
+      ids.add(b.id)
+      const prev = bullets.get(b.id)
+      const vx = (b.vx !== undefined) ? b.vx : (prev ? prev.vx : 0)
+      const vy = (b.vy !== undefined) ? b.vy : (prev ? prev.vy : 0)
+      bullets.set(b.id, { id: b.id, x: b.x, y: b.y, vx, vy, t: nowT })
+    }
+    for (const id of Array.from(bullets.keys())) {
+      if (!ids.has(id)) bullets.delete(id)
+    }
   }
 })
 
 const keys = { ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false, KeyW:false, KeyA:false, KeyS:false, KeyD:false, Space:false }
-function onKey(e){ const k = e.code; if (k in keys){ keys[k] = e.type === 'keydown'; e.preventDefault() } }
+function onKey(e){
+  const tag = document.activeElement && document.activeElement.tagName
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON'
+  if (!nameReady || typing) return
+  const k = e.code
+  if (k in keys){ keys[k] = e.type === 'keydown'; e.preventDefault() }
+}
 window.addEventListener('keydown', onKey)
 window.addEventListener('keyup', onKey)
 
@@ -91,6 +121,12 @@ function clamp(v, min, max){ if (v<min) return min; if (v>max) return max; retur
 function update(dt){
   const speed = 660
   let vx = 0, vy = 0
+  for (const b of bullets.values()) {
+    b.x += b.vx * dt
+    b.y += b.vy * dt
+  }
+  for (const d of dmgPopups) d.t += dt
+  dmgPopups = dmgPopups.filter(d => d.t < 1.0)
   if (isDead()) {
     return
   }
@@ -124,6 +160,15 @@ function update(dt){
     if (t >= 1) dashing = false
   }
   const now = performance.now()
+  if (mouseLeft && aim && now - lastShoot > 150 && !isDead()) {
+    const dx = aim.x - me.x
+    const dy = aim.y - me.y
+    const len = Math.hypot(dx, dy)
+    if (len && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'shoot', dx, dy }))
+      lastShoot = now
+    }
+  }
   if (now - lastSend > 50) {
     if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'move', x: me.x, y: me.y }))
     lastSend = now
@@ -138,21 +183,15 @@ function draw(){
   const scale = Math.min(scaleX, scaleY)
   const ox = (w - world.width*scale)/2
   const oy = (h - world.height*scale)/2
-  ctx.fillStyle = '#16325c'
+  const grad = ctx.createRadialGradient(ox + world.width*scale/2, oy + world.height*scale/2, 0, ox + world.width*scale/2, oy + world.height*scale/2, Math.max(world.width,world.height)*scale/2)
+  grad.addColorStop(0, '#173a6a')
+  grad.addColorStop(0.7, '#122b4f')
+  grad.addColorStop(1, '#0e2142')
+  ctx.fillStyle = grad
   ctx.fillRect(ox, oy, world.width*scale, world.height*scale)
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)'
-  for (let gx = 0; gx <= world.width; gx += 100) {
-    ctx.beginPath()
-    ctx.moveTo(ox + gx*scale, oy)
-    ctx.lineTo(ox + gx*scale, oy + world.height*scale)
-    ctx.stroke()
-  }
-  for (let gy = 0; gy <= world.height; gy += 100) {
-    ctx.beginPath()
-    ctx.moveTo(ox, oy + gy*scale)
-    ctx.lineTo(ox + world.width*scale, oy + gy*scale)
-    ctx.stroke()
-  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
+  ctx.lineWidth = 2
+  ctx.strokeRect(ox, oy, world.width*scale, world.height*scale)
   {
     const px = ox + me.x*scale
     const py = oy + me.y*scale
@@ -166,23 +205,39 @@ function draw(){
     ctx.moveTo(px, py)
     ctx.lineTo(ax, ay)
     ctx.stroke()
+    ctx.lineWidth = 1.5
     ctx.beginPath()
-    ctx.arc(ax, ay, 8, 0, Math.PI*2)
+    ctx.arc(ax, ay, 9, 0, Math.PI*2)
     ctx.stroke()
     ctx.beginPath()
-    ctx.moveTo(ax-12, ay)
-    ctx.lineTo(ax+12, ay)
-    ctx.moveTo(ax, ay-12)
-    ctx.lineTo(ax, ay+12)
+    ctx.moveTo(ax-10, ay)
+    ctx.lineTo(ax+10, ay)
+    ctx.moveTo(ax, ay-10)
+    ctx.lineTo(ax, ay+10)
     ctx.stroke()
   }
-  for (const b of projectiles) {
+  for (const b of bullets.values()) {
     const bx = ox + b.x*scale
     const by = oy + b.y*scale
+    const tail = 18
+    const bl = Math.hypot(b.vx, b.vy)
+    const tx = bx - (b.vx/bl) * tail
+    const ty = by - (b.vy/bl) * tail
+    ctx.strokeStyle = 'rgba(255,208,87,0.6)'
+    ctx.lineWidth = 3
+    if (bl > 0) {
+      ctx.beginPath()
+      ctx.moveTo(tx, ty)
+      ctx.lineTo(bx, by)
+      ctx.stroke()
+    }
     ctx.beginPath()
     ctx.fillStyle = '#ffd057'
-    ctx.arc(bx, by, 6, 0, Math.PI*2)
+    ctx.shadowColor = '#ffd057'
+    ctx.shadowBlur = 12
+    ctx.arc(bx, by, 4, 0, Math.PI*2)
     ctx.fill()
+    ctx.shadowBlur = 0
   }
   for (const p of players.values()) {
     let rx = p.x
@@ -200,10 +255,16 @@ function draw(){
     }
     const px = ox + rx*scale
     const py = oy + ry*scale
+    const g = ctx.createRadialGradient(px, py, 0, px, py, 12)
+    g.addColorStop(0, p.color || '#ffffff')
+    g.addColorStop(1, '#ffffff')
     ctx.beginPath()
-    ctx.fillStyle = p.color || '#ffffff'
-    ctx.arc(px, py, 10, 0, Math.PI*2)
+    ctx.fillStyle = g
+    ctx.shadowColor = p.color || '#ffffff'
+    ctx.shadowBlur = 18
+    ctx.arc(px, py, p.boss ? 18 : 10, 0, Math.PI*2)
     ctx.fill()
+    ctx.shadowBlur = 0
     if (p.id === me.id) {
       ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 2
@@ -211,13 +272,24 @@ function draw(){
       ctx.arc(px, py, 14, 0, Math.PI*2)
       ctx.stroke()
     }
-    const barW = 44
-    const barH = 6
-    const frac = Math.max(0, Math.min(1, (p.hp||100)/100))
-    ctx.fillStyle = 'rgba(0,0,0,0.4)'
-    ctx.fillRect(px - barW/2, py - 26, barW, barH)
-    ctx.fillStyle = '#3ec56d'
-    ctx.fillRect(px - barW/2, py - 26, barW * frac, barH)
+    const isBoss = !!p.boss
+    if (!isBoss) {
+      const maxHp = Math.max(1, p.maxHp || 100)
+      const barW = 54
+      const barH = 8
+      const frac = Math.max(0, Math.min(1, (p.hp||maxHp)/maxHp))
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'
+      ctx.beginPath()
+      ctx.moveTo(px - barW/2 + 6, py - 30)
+      ctx.arcTo(px + barW/2, py - 30, px + barW/2, py - 30 + barH, 6)
+      ctx.arcTo(px + barW/2, py - 30 + barH, px - barW/2, py - 30 + barH, 6)
+      ctx.arcTo(px - barW/2, py - 30 + barH, px - barW/2, py - 30, 6)
+      ctx.arcTo(px - barW/2, py - 30, px + barW/2, py - 30, 6)
+      ctx.closePath()
+      ctx.fill()
+      ctx.fillStyle = '#34d399'
+      ctx.fillRect(px - barW/2, py - 30, barW * frac, barH)
+    }
     ctx.fillStyle = '#e6edf3'
     ctx.font = '12px system-ui'
     ctx.textAlign = 'center'
@@ -235,6 +307,39 @@ function draw(){
     ctx.fillStyle = '#e6edf3'
     ctx.font = '16px system-ui'
     ctx.fillText('respawning...', w/2, h/2 + 36)
+  }
+  const boss = Array.from(players.values()).find(p => p.boss)
+  if (boss) {
+    const maxHp = Math.max(1, boss.maxHp || 100)
+    const frac = Math.max(0, Math.min(1, (boss.hp||maxHp)/maxHp))
+    const bw = Math.min(420, w*0.6)
+    const bx = (w - bw)/2
+    const by = 20
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'
+    ctx.fillRect(bx, by, bw, 12)
+    ctx.fillStyle = '#ef4444'
+    ctx.fillRect(bx, by, bw*frac, 12)
+    ctx.fillStyle = '#e6edf3'
+    ctx.font = '12px system-ui'
+    ctx.textAlign = 'center'
+    ctx.fillText(`BOSS ${Math.max(0, boss.hp|0)}/${maxHp|0}`, w/2, by + 24)
+  }
+  for (const d of dmgPopups) {
+    const islandPadding = 80
+    const scaleX = (w - islandPadding*2) / world.width
+    const scaleY = (h - islandPadding*2) / world.height
+    const scale = Math.min(scaleX, scaleY)
+    const ox = (w - world.width*scale)/2
+    const oy = (h - world.height*scale)/2
+    const px = ox + d.x*scale
+    const py = oy + d.y*scale - d.t*40
+    const alpha = Math.max(0, 1 - d.t)
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = '#ef4444'
+    ctx.font = 'bold 16px system-ui'
+    ctx.textAlign = 'center'
+    ctx.fillText(`-${d.amount|0}`, px, py)
+    ctx.globalAlpha = 1
   }
 }
 
@@ -255,6 +360,7 @@ function worldFromMouse(e){
 
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0) return
+  mouseLeft = true
   if (isDead()) return
   const now = performance.now()
   if (now - lastShoot < 150) return
@@ -271,6 +377,11 @@ canvas.addEventListener('mousemove', e => {
   const t = worldFromMouse(e)
   aim = { x: t.x, y: t.y }
 })
+const hudNameEl = document.getElementById('hud-name')
+if (hudNameEl) hudNameEl.textContent = me.name || ''
+
+window.addEventListener('mouseup', e => { if (e.button === 0) mouseLeft = false })
+canvas.addEventListener('mouseleave', () => { mouseLeft = false })
 
 let last = performance.now()
 function loop(){

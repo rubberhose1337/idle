@@ -12,14 +12,21 @@ const wss = new WebSocketServer({ server })
 const players = new Map()
 const projectiles = new Map()
 const maxNPC = 1
-function npcCount(){ let c = 0; for (const p of players.values()) if (p.npc) c++; return c }
+function npcCount(){ let c = 0; for (const p of players.values()) if (p.npc && !p.boss) c++; return c }
 function spawnNPC(){
   if (npcCount() >= maxNPC) return
   const id = uuidv4()
   const color = '#f5a524'
   const x = Math.floor(island.width/2 + Math.random()*400 - 200)
   const y = Math.floor(island.height/2 + Math.random()*400 - 200)
-  players.set(id, { id, x, y, color, hp: 100, lastShot: 0, lastDash: 0, deadUntil: null, npc: true, name: 'NPC', ai: { tx: x, ty: y, next: Date.now() } })
+  players.set(id, { id, x, y, color, hp: 100, maxHp: 100, lastShot: 0, lastDash: 0, deadUntil: null, npc: true, ai: { tx: x, ty: y, next: Date.now() } })
+}
+function spawnBoss(){
+  const id = 'boss'
+  if (players.has(id)) return
+  const x = Math.floor(island.width/2)
+  const y = 140
+  players.set(id, { id, x, y, color: '#ff4d4f', hp: 200, maxHp: 200, lastShot: 0, lastDash: 0, deadUntil: null, npc: true, boss: true, name: 'BOSS' })
 }
 let lastTick = Date.now()
 const island = { width: 2000, height: 2000 }
@@ -33,8 +40,8 @@ function clamp(v, min, max) {
 function broadcastState() {
   const payload = JSON.stringify({
     type: 'state',
-    players: Array.from(players.values()).map(p => ({ id: p.id, x: p.x, y: p.y, color: p.color, hp: p.hp, deadUntil: p.deadUntil || null, name: p.name || null })),
-    projectiles: Array.from(projectiles.values()).map(b => ({ id: b.id, x: b.x, y: b.y, owner: b.owner }))
+    players: Array.from(players.values()).map(p => ({ id: p.id, x: p.x, y: p.y, color: p.color, hp: p.hp, maxHp: p.maxHp || 100, deadUntil: p.deadUntil || null, name: p.name || null, npc: !!p.npc, boss: !!p.boss })),
+    projectiles: Array.from(projectiles.values()).map(b => ({ id: b.id, x: b.x, y: b.y, owner: b.owner, vx: b.vx, vy: b.vy }))
   })
   wss.clients.forEach(client => {
     if (client.readyState === 1) client.send(payload)
@@ -56,7 +63,7 @@ wss.on('connection', ws => {
         const y = Math.floor(island.height/2 + Math.random()*200 - 100)
         const rawName = typeof data.name === 'string' ? data.name : ''
         const safeName = rawName.trim().slice(0, 16) || 'Player'
-        players.set(playerId, { id: playerId, x, y, color, hp: 100, lastShot: 0, lastDash: 0, deadUntil: null, name: safeName })
+        players.set(playerId, { id: playerId, x, y, color, hp: 100, maxHp: 100, lastShot: 0, lastDash: 0, deadUntil: null, name: safeName })
       }
       broadcastState()
     }
@@ -112,6 +119,7 @@ wss.on('connection', ws => {
 
 const PORT = process.env.PORT || 3000
 server.listen(PORT, () => {
+  spawnBoss()
   console.log(`http://localhost:${PORT}/`)
 })
 
@@ -132,11 +140,26 @@ setInterval(() => {
       if (p.deadUntil && now < p.deadUntil) continue
       const dx = p.x - b.x
       const dy = p.y - b.y
-      if (dx*dx + dy*dy <= 20*20) {
+      const hitR = (p.boss ? 32 : 20) * 1.3
+      if (dx*dx + dy*dy <= hitR*hitR) {
+        const owner = players.get(b.owner)
+        const ownerIsPlayer = owner && !owner.npc
+        const targetIsPlayer = !p.npc
         projectiles.delete(b.id)
-        p.hp = Math.max(0, p.hp - 10)
-        if (p.hp <= 0 && !p.deadUntil) {
-          p.deadUntil = Date.now() + 3000
+        if (ownerIsPlayer && targetIsPlayer) {
+          // PvP disabled: no damage
+        } else {
+          const dmg = ownerIsPlayer ? 1 : 10
+          if (dmg > 0) {
+            p.hp = Math.max(0, p.hp - dmg)
+            if (p.hp <= 0) {
+              if (p.boss) {
+                // Boss stays defeated at 0 hp; no respawn timer
+              } else if (!p.deadUntil) {
+                p.deadUntil = Date.now() + 3000
+              }
+            }
+          }
         }
         break
       }
@@ -145,6 +168,7 @@ setInterval(() => {
   const live = Array.from(players.values()).filter(p => !(p.deadUntil && now < p.deadUntil))
   for (const n of players.values()) {
     if (!n.npc) continue
+    if (n.boss) continue
     if (n.deadUntil && now < n.deadUntil) continue
     let vx = 0, vy = 0
     let target = null
@@ -236,17 +260,35 @@ setInterval(() => {
       }
     }
   }
+  {
+    const boss = Array.from(players.values()).find(p => p.boss && !(p.deadUntil && now < p.deadUntil) && (p.hp || 0) > 0)
+    if (boss) {
+      if (now - boss.lastShot > 1200) {
+        boss.lastShot = now
+        const count = 24
+        const offset = Math.random() * Math.PI * 2
+        const speed = 500
+        for (let i = 0; i < count; i++) {
+          const angle = offset + i * (Math.PI * 2 / count)
+          const vx = Math.cos(angle) * speed
+          const vy = Math.sin(angle) * speed
+          const id = uuidv4()
+          projectiles.set(id, { id, x: boss.x, y: boss.y, vx, vy, owner: boss.id, ttl: 3000 })
+        }
+      }
+    }
+  }
   for (const p of players.values()) {
     if (p.deadUntil && now >= p.deadUntil) {
-      p.hp = 100
-      const rx = Math.floor(island.width/2 + Math.random()*200 - 100)
-      const ry = Math.floor(island.height/2 + Math.random()*200 - 100)
-      p.x = rx
-      p.y = ry
-      p.deadUntil = null
+      if (!p.npc) {
+        p.hp = p.maxHp || 100
+        const rx = Math.floor(island.width/2 + Math.random()*200 - 100)
+        const ry = Math.floor(island.height/2 + Math.random()*200 - 100)
+        p.x = rx
+        p.y = ry
+        p.deadUntil = null
+      }
     }
   }
   broadcastState()
 }, 50)
-
-setInterval(() => { spawnNPC() }, 5000)
