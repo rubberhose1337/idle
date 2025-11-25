@@ -13,6 +13,7 @@ let world = { width: 2000, height: 2000 }
 let players = new Map()
 let me = { id: meId, x: world.width/2, y: world.height/2, color: '#5bd1ff' }
 players.set(me.id, me)
+let projectiles = []
 
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host)
 ws.addEventListener('open', () => {
@@ -31,15 +32,19 @@ ws.addEventListener('message', ev => {
     for (const p of list) map.set(p.id, p)
     players = map
     if (players.has(me.id)) me = players.get(me.id)
+    projectiles = Array.isArray(msg.projectiles) ? msg.projectiles : []
   }
 })
 
-const keys = { ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false, KeyW:false, KeyA:false, KeyS:false, KeyD:false }
+const keys = { ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false, KeyW:false, KeyA:false, KeyS:false, KeyD:false, Space:false }
 function onKey(e){ const k = e.code; if (k in keys){ keys[k] = e.type === 'keydown'; e.preventDefault() } }
 window.addEventListener('keydown', onKey)
 window.addEventListener('keyup', onKey)
 
 let lastSend = 0
+let lastShoot = 0
+let faceX = 0
+let faceY = -1
 function clamp(v, min, max){ if (v<min) return min; if (v>max) return max; return v }
 
 function update(dt){
@@ -54,11 +59,17 @@ function update(dt){
     vx /= len; vy /= len
     me.x = clamp(me.x + vx * speed * dt, 0, world.width)
     me.y = clamp(me.y + vy * speed * dt, 0, world.height)
+    faceX = vx
+    faceY = vy
   }
   const now = performance.now()
   if (now - lastSend > 50) {
     if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'move', x: me.x, y: me.y }))
     lastSend = now
+  }
+  if (keys.Space && now - lastShoot > 150) {
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'shoot', dx: faceX, dy: faceY }))
+    lastShoot = now
   }
 }
 
@@ -85,6 +96,14 @@ function draw(){
     ctx.lineTo(ox + world.width*scale, oy + gy*scale)
     ctx.stroke()
   }
+  for (const b of projectiles) {
+    const bx = ox + b.x*scale
+    const by = oy + b.y*scale
+    ctx.beginPath()
+    ctx.fillStyle = '#ffd057'
+    ctx.arc(bx, by, 6, 0, Math.PI*2)
+    ctx.fill()
+  }
   for (const p of players.values()) {
     const px = ox + p.x*scale
     const py = oy + p.y*scale
@@ -99,10 +118,17 @@ function draw(){
       ctx.arc(px, py, 14, 0, Math.PI*2)
       ctx.stroke()
     }
+    const barW = 44
+    const barH = 6
+    const frac = Math.max(0, Math.min(1, (p.hp||100)/100))
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'
+    ctx.fillRect(px - barW/2, py - 26, barW, barH)
+    ctx.fillStyle = '#3ec56d'
+    ctx.fillRect(px - barW/2, py - 26, barW * frac, barH)
     ctx.fillStyle = '#e6edf3'
     ctx.font = '12px system-ui'
     ctx.textAlign = 'center'
-    ctx.fillText(p.id.slice(0,4), px, py - 16)
+    ctx.fillText(p.id.slice(0,4), px, py - 36)
   }
 }
 
