@@ -36,19 +36,17 @@ ws.addEventListener('message', ev => {
   }
 })
 
-const keys = { ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false, KeyW:false, KeyA:false, KeyS:false, KeyD:false, Space:false }
+const keys = { ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false, KeyW:false, KeyA:false, KeyS:false, KeyD:false }
 function onKey(e){ const k = e.code; if (k in keys){ keys[k] = e.type === 'keydown'; e.preventDefault() } }
 window.addEventListener('keydown', onKey)
 window.addEventListener('keyup', onKey)
 
 let lastSend = 0
 let lastShoot = 0
-let faceX = 0
-let faceY = -1
 function clamp(v, min, max){ if (v<min) return min; if (v>max) return max; return v }
 
 function update(dt){
-  const speed = 220
+  const speed = 660
   let vx = 0, vy = 0
   if (keys.KeyW || keys.ArrowUp) vy -= 1
   if (keys.KeyS || keys.ArrowDown) vy += 1
@@ -59,17 +57,11 @@ function update(dt){
     vx /= len; vy /= len
     me.x = clamp(me.x + vx * speed * dt, 0, world.width)
     me.y = clamp(me.y + vy * speed * dt, 0, world.height)
-    faceX = vx
-    faceY = vy
   }
   const now = performance.now()
   if (now - lastSend > 50) {
     if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'move', x: me.x, y: me.y }))
     lastSend = now
-  }
-  if (keys.Space && now - lastShoot > 150) {
-    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'shoot', dx: faceX, dy: faceY }))
-    lastShoot = now
   }
 }
 
@@ -131,6 +123,34 @@ function draw(){
     ctx.fillText(p.id.slice(0,4), px, py - 36)
   }
 }
+
+function worldFromMouse(e){
+  const rect = canvas.getBoundingClientRect()
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  const islandPadding = 80
+  const scaleX = (w - islandPadding*2) / world.width
+  const scaleY = (h - islandPadding*2) / world.height
+  const scale = Math.min(scaleX, scaleY)
+  const ox = (w - world.width*scale)/2
+  const oy = (h - world.height*scale)/2
+  const x = (mx - ox) / scale
+  const y = (my - oy) / scale
+  return { x, y }
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return
+  const now = performance.now()
+  if (now - lastShoot < 150) return
+  const t = worldFromMouse(e)
+  const dx = t.x - me.x
+  const dy = t.y - me.y
+  const len = Math.hypot(dx, dy)
+  if (!len) return
+  if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'shoot', dx, dy }))
+  lastShoot = now
+})
 
 let last = performance.now()
 function loop(){
