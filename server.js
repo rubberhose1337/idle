@@ -11,7 +11,7 @@ const wss = new WebSocketServer({ server })
 
 const players = new Map()
 const projectiles = new Map()
-const maxNPC = 2
+const maxNPC = 1
 function npcCount(){ let c = 0; for (const p of players.values()) if (p.npc) c++; return c }
 function spawnNPC(){
   if (npcCount() >= maxNPC) return
@@ -19,7 +19,7 @@ function spawnNPC(){
   const color = '#f5a524'
   const x = Math.floor(island.width/2 + Math.random()*400 - 200)
   const y = Math.floor(island.height/2 + Math.random()*400 - 200)
-  players.set(id, { id, x, y, color, hp: 100, lastShot: 0, lastDash: 0, deadUntil: null, npc: true, ai: { tx: x, ty: y, next: Date.now() } })
+  players.set(id, { id, x, y, color, hp: 100, lastShot: 0, lastDash: 0, deadUntil: null, npc: true, name: 'NPC', ai: { tx: x, ty: y, next: Date.now() } })
 }
 let lastTick = Date.now()
 const island = { width: 2000, height: 2000 }
@@ -33,7 +33,7 @@ function clamp(v, min, max) {
 function broadcastState() {
   const payload = JSON.stringify({
     type: 'state',
-    players: Array.from(players.values()).map(p => ({ id: p.id, x: p.x, y: p.y, color: p.color, hp: p.hp, deadUntil: p.deadUntil || null })),
+    players: Array.from(players.values()).map(p => ({ id: p.id, x: p.x, y: p.y, color: p.color, hp: p.hp, deadUntil: p.deadUntil || null, name: p.name || null })),
     projectiles: Array.from(projectiles.values()).map(b => ({ id: b.id, x: b.x, y: b.y, owner: b.owner }))
   })
   wss.clients.forEach(client => {
@@ -54,7 +54,9 @@ wss.on('connection', ws => {
         const color = `hsl(${Math.floor(Math.random()*360)},70%,55%)`
         const x = Math.floor(island.width/2 + Math.random()*200 - 100)
         const y = Math.floor(island.height/2 + Math.random()*200 - 100)
-        players.set(playerId, { id: playerId, x, y, color, hp: 100, lastShot: 0, lastDash: 0, deadUntil: null })
+        const rawName = typeof data.name === 'string' ? data.name : ''
+        const safeName = rawName.trim().slice(0, 16) || 'Player'
+        players.set(playerId, { id: playerId, x, y, color, hp: 100, lastShot: 0, lastDash: 0, deadUntil: null, name: safeName })
       }
       broadcastState()
     }

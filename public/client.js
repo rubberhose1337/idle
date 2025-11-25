@@ -18,9 +18,34 @@ let aim = null
 function isDead(){ return me && me.deadUntil && Date.now() < me.deadUntil }
 
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host)
+let playerName = localStorage.getItem('player_name') || null
+let nameReady = !!playerName
+me.name = playerName || 'Player'
+let wsOpened = false
 ws.addEventListener('open', () => {
-  ws.send(JSON.stringify({ type: 'join', id: me.id }))
+  wsOpened = true
+  if (nameReady) ws.send(JSON.stringify({ type: 'join', id: me.id, name: playerName }))
 })
+function initNameUI(){
+  const ov = document.getElementById('name-overlay')
+  const inp = document.getElementById('name-input')
+  const btn = document.getElementById('name-btn')
+  if (!nameReady){
+    ov.style.display = 'flex'
+    inp.focus()
+    btn.onclick = () => {
+      const n = (inp.value || '').trim().slice(0,16)
+      if (!n) return
+      playerName = n
+      localStorage.setItem('player_name', playerName)
+      me.name = playerName
+      nameReady = true
+      ov.style.display = 'none'
+      if (wsOpened && ws.readyState === 1) ws.send(JSON.stringify({ type: 'join', id: me.id, name: playerName }))
+    }
+  }
+}
+initNameUI()
 ws.addEventListener('message', ev => {
   let msg
   try { msg = JSON.parse(ev.data) } catch { return }
@@ -38,6 +63,7 @@ ws.addEventListener('message', ev => {
       me.hp = mine.hp ?? me.hp
       me.color = mine.color ?? me.color
       me.deadUntil = mine.deadUntil ?? me.deadUntil
+      me.name = mine.name ?? me.name
     }
     projectiles = Array.isArray(msg.projectiles) ? msg.projectiles : []
   }
@@ -195,7 +221,8 @@ function draw(){
     ctx.fillStyle = '#e6edf3'
     ctx.font = '12px system-ui'
     ctx.textAlign = 'center'
-    ctx.fillText(p.id.slice(0,4), px, py - 36)
+    const label = (p.name && String(p.name).slice(0,16)) || p.id.slice(0,4)
+    ctx.fillText(label, px, py - 36)
   }
 
   if (isDead()) {
